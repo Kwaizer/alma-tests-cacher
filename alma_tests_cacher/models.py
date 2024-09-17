@@ -1,6 +1,6 @@
 from typing import List, Optional, Union
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
 from alma_tests_cacher.constants import (
@@ -12,10 +12,15 @@ from alma_tests_cacher.constants import (
 
 
 class PackageTestRepository(BaseModel):
-    id: Optional[int] = None
+    int_id: Optional[int] = Field(None, alias='id')
+    bson_id: Optional[str] = Field(None, alias='_id')
     package_name: str
     folder_name: str
     url: str
+
+    @property
+    def id(self):
+        return self.int_id or self.bson_id
 
 
 class TestRepository(BaseModel):
