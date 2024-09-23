@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import re
 import urllib.parse
@@ -158,6 +159,15 @@ class AlmaTestsCacher:
         except Exception:
             self.logger.exception('Cannot create new test folders:')
 
+    def compile_test_rules(self, test_rules: dict, remote_folders: list):
+        compiled_test_rules = []
+        for regex, folder_name in test_rules.items():
+            if folder_name not in remote_folders:
+                self.logger.warning(f"test_rules.json: Missing {folder_name} in repository. Skipping.")
+                continue
+            compiled_test_rules.append((re.compile(regex), folder_name))
+        return compiled_test_rules
+
     async def process_repo(
         self,
         repo: TestRepository,
@@ -206,10 +216,22 @@ class AlmaTestsCacher:
                 regex_pattern = (
                     rf'^({tests_prefix}|{repo.common_test_dir_name})'
                 )
+                common_dir = Path(repo_dir, repo.tests_dir, repo.common_test_dir_name)
+            else:
+                common_dir = Path(repo_dir, repo.tests_dir, 'common')
+
             for folder in repo_dir.glob(f'{repo.tests_dir}*'):
                 if not re.search(regex_pattern, folder.name):
                     continue
                 remote_test_folders.append(folder.name)
+            test_rules_path = common_dir / 'test_rules.json'
+            if test_rules_path.exists():
+                with open(test_rules_path, 'r') as f:
+                    test_rules = json.load(f)
+            else:
+                self.logger.warning(f'No test_rules.json found in {common_dir}')
+                test_rules = {}
+            compiled_test_rules = self.compile_test_rules(test_rules, remote_test_folders)
             test_folders_mapping = {
                 test.folder_name: test for test in repo.packages
             }
@@ -231,6 +253,23 @@ class AlmaTestsCacher:
                 )
                 new_test_folders.append(new_test)
                 repo.packages.append(new_test)
+            missing_test_packages = [
+                test.package_name for test_folder, test in test_folders_mapping.items()
+                if test_folder not in remote_test_folders
+            ]
+            for package_name in missing_test_packages:
+                for pattern, target_dir in compiled_test_rules:
+                    if re.match(pattern, package_name):
+                        new_test = PackageTestRepository(
+                            folder_name=remote_test_folder,
+                            package_name=package_name,
+                            url=urllib.parse.urljoin(
+                                urllib.parse.urljoin(repo.url, repo.tests_dir),
+                                target_dir,
+                            ),
+                        )
+                        new_test_folders.append(new_test)
+                        repo.packages.append(new_test)
             await self.bulk_create_test_folders(new_test_folders, repo.id)
             await self.bulk_remove_test_folders(
                 [
