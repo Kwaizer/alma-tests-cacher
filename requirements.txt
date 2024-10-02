@@ -2,5 +2,5 @@ aiohttp==3.10.8
 pydantic==2.7.1
 pydantic-settings==2.5.2
 sentry-sdk==2.15.0
-PyYAML==6.0.1
+PyYAML==6.0.2
 plumbum==1.8.3
