@@ -261,7 +261,7 @@ class AlmaTestsCacher:
                 for pattern, target_dir in compiled_test_rules:
                     if re.match(pattern, package_name):
                         new_test = PackageTestRepository(
-                            folder_name=remote_test_folder,
+                            folder_name=target_dir,
                             package_name=package_name,
                             url=urllib.parse.urljoin(
                                 urllib.parse.urljoin(repo.url, repo.tests_dir),
