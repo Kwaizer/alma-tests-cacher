@@ -44,7 +44,8 @@ class AlmaTestsCacher:
         self.logger = self.setup_logger(logging_level)
         self.gerrit_username = gerrit_username
 
-    def setup_logger(self, logging_level: str) -> logging.Logger:
+    @staticmethod
+    def setup_logger(logging_level: str) -> logging.Logger:
         logger = logging.getLogger('tests-cacher')
         logger.setLevel(logging_level)
         handler = logging.StreamHandler()
@@ -159,15 +160,6 @@ class AlmaTestsCacher:
         except Exception:
             self.logger.exception('Cannot create new test folders:')
 
-    def compile_test_rules(self, test_rules: dict, remote_folders: list):
-        compiled_test_rules = []
-        for regex, folder_name in test_rules.items():
-            if folder_name not in remote_folders:
-                self.logger.warning(f"test_rules.json: Missing {folder_name} in repository. Skipping.")
-                continue
-            compiled_test_rules.append((re.compile(regex), folder_name))
-        return compiled_test_rules
-
     async def process_repo(
         self,
         repo: TestRepository,
@@ -231,7 +223,12 @@ class AlmaTestsCacher:
             else:
                 self.logger.warning(f'No test_rules.json found in {common_dir}')
                 test_rules = {}
-            compiled_test_rules = self.compile_test_rules(test_rules, remote_test_folders)
+            compiled_test_rules = []
+            for regex, folder_name in test_rules.items():
+                if folder_name not in remote_test_folders:
+                    self.logger.warning(f"test_rules.json: Missing {folder_name} in repository. Skipping.")
+                    continue
+                compiled_test_rules.append((regex, folder_name))
             test_folders_mapping = {
                 test.folder_name: test for test in repo.packages
             }
@@ -253,23 +250,21 @@ class AlmaTestsCacher:
                 )
                 new_test_folders.append(new_test)
                 repo.packages.append(new_test)
-            missing_test_packages = [
-                test.package_name for test_folder, test in test_folders_mapping.items()
-                if test_folder not in remote_test_folders
-            ]
-            for package_name in missing_test_packages:
-                for pattern, target_dir in compiled_test_rules:
-                    if re.match(pattern, package_name):
-                        new_test = PackageTestRepository(
-                            folder_name=target_dir,
-                            package_name=package_name,
-                            url=urllib.parse.urljoin(
-                                urllib.parse.urljoin(repo.url, repo.tests_dir),
-                                target_dir,
-                            ),
-                        )
-                        new_test_folders.append(new_test)
-                        repo.packages.append(new_test)
+            for pattern, target_dir in compiled_test_rules:
+                existent_test = test_folders_mapping.get(target_dir)
+                if existent_test:
+                    continue
+                new_test = PackageTestRepository(
+                    folder_name=target_dir,
+                    package_name=pattern,
+                    url=urllib.parse.urljoin(
+                        urllib.parse.urljoin(repo.url, repo.tests_dir),
+                        target_dir,
+                    ),
+                    regex=pattern,
+                )
+                new_test_folders.append(new_test)
+                repo.packages.append(new_test)
             await self.bulk_create_test_folders(new_test_folders, repo.id)
             await self.bulk_remove_test_folders(
                 [
