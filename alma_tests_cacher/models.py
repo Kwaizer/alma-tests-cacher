@@ -17,6 +17,7 @@ class PackageTestRepository(BaseModel):
     package_name: str
     folder_name: str
     url: str
+    regex: Optional[str] = None
 
     @property
     def id(self):
@@ -30,7 +31,7 @@ class TestRepository(BaseModel):
     url: str
     tests_dir: str
     tests_prefix: Optional[str] = ""
-    packages: List[PackageTestRepository]
+    packages: Optional[List[PackageTestRepository]] = Field(default_factory=list)
     common_test_dir_name: str = ""
 
 
