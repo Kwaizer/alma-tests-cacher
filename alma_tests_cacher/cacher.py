@@ -2,10 +2,11 @@ import asyncio
 import json
 import logging
 import re
+import shutil
 import urllib.parse
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Any, Dict
 
 import aiohttp
 
@@ -118,6 +119,21 @@ class AlmaTestsCacher:
             test_repos.append(TestRepository(**test_repo))
         return test_repos
 
+    def get_compiled_test_rules(
+        self,
+        test_rules: Dict[str, Any],
+        remote_test_folders: List[str]
+    ) -> tuple[list[tuple[Any, Any]], list[Any]]:
+        missing_folders = []
+        compiled_test_rules = []
+        for regex, folder_name in test_rules.items():
+            if folder_name not in remote_test_folders:
+                self.logger.warning(f"test_rules.json: Missing {folder_name} in repository. Skipping.")
+                missing_folders.append(folder_name)
+                continue
+            compiled_test_rules.append((regex, folder_name))
+        return compiled_test_rules, missing_folders
+
     async def bulk_remove_test_folders(
         self,
         test_folders_ids: List[int],
@@ -223,12 +239,33 @@ class AlmaTestsCacher:
             else:
                 self.logger.warning(f'No test_rules.json found in {common_dir}')
                 test_rules = {}
-            compiled_test_rules = []
-            for regex, folder_name in test_rules.items():
-                if folder_name not in remote_test_folders:
-                    self.logger.warning(f"test_rules.json: Missing {folder_name} in repository. Skipping.")
-                    continue
-                compiled_test_rules.append((regex, folder_name))
+            compiled_test_rules, missing_folders = self.get_compiled_test_rules(test_rules, remote_test_folders)
+            if missing_folders:
+                self.logger.info('Missing folders detected. Attempting to fix repository state...')
+                shutil.rmtree(repo_dir, ignore_errors=True)
+                try:
+                    exit_code, stdout, stderr = clone_git_repo(workdir, repo.url)
+                except Exception:
+                    self.logger.exception('Cannot clone git repo:')
+                    return
+                self.logger.debug(
+                    'Re-clone result:\nexit_code: %s\nstdout: %s\nstderr: %s',
+                    exit_code,
+                    stdout,
+                    stderr,
+                )
+                remote_test_folders.clear()
+                for folder in repo_dir.glob(f'{repo.tests_dir}*'):
+                    if not re.search(regex_pattern, folder.name):
+                        continue
+                    remote_test_folders.append(folder.name)
+                compiled_test_rules.clear()
+                missing_folders.clear()
+                compiled_test_rules, missing_folders = self.get_compiled_test_rules(test_rules, remote_test_folders)
+                if missing_folders: [
+                    self.logger.warning(f"test_rules.json: Missing {missing_folder} in repository after re-cloning. Skipping.")
+                    for missing_folder in missing_folders
+                ]
             test_folders_mapping = {
                 test.folder_name: test for test in repo.packages
             }
